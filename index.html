@@ -1,1 +1,254 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Intégrale : rectangles de Riemann</title>
+<style>
+  :root{ --bg:#0b0f14; --panel:#121821; --ink:#eaf2fb; --muted:#92a6bb; --accent:#50a8ff; --accent2:#71dca0; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif}
+  header{padding:14px 18px;border-bottom:1px solid #1f2a38;background:linear-gradient(180deg,#0e141d,#0b0f14)}
+  h1{margin:0;font-size:18px;letter-spacing:.2px}
+  .wrap{display:grid;gap:14px;padding:14px;grid-template-columns:340px 1fr;align-items:start}
+  .panel{background:var(--panel);border:1px solid #1f2a38;border-radius:16px;padding:14px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  select,input[type="number"],input[type="text"]{background:#0f1520;color:var(--ink);border:1px solid #243244;border-radius:10px;padding:8px 10px;outline:none;width:100%}
+  select{cursor:pointer}
+  .slider{width:100%}
+  .small{font-size:12px;color:var(--muted)}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .stat{background:#0f1520;border:1px solid #243244;border-radius:12px;padding:10px}
+  .stat b{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  /* important: width/height ATTRIBUTS + CSS OK */
+  canvas{width:100%;height:460px;background:#0b1017;border-radius:16px;border:1px solid #1f2a38}
+  .legend{display:flex;gap:14px;align-items:center;margin-top:8px;color:var(--muted);font-size:12px}
+  .dot{width:12px;height:12px;border-radius:3px;display:inline-block;vertical-align:middle;margin-right:6px}
+  .dot.func{background:var(--accent)}
+  .dot.rect{background:rgba(113,220,160,.5);border:1px solid #3aa470}
+  .row-inline{display:flex;gap:8px}
+  .hint{margin-top:6px}
+  button{background:#0f1520;border:1px solid #243244;color:var(--ink);padding:8px 12px;border-radius:10px;cursor:pointer}
+  button:hover{border-color:#2f4158}
+  @media (max-width: 900px){ .wrap{grid-template-columns:1fr} }
+  /* panneau d’erreur plein écran si JS plante */
+  #jsError{position:fixed;inset:0;background:#0b0f14;color:#fca5a5;padding:14px;white-space:pre-wrap;overflow:auto;display:none}
+</style>
+</head>
+<body>
+  <div id="jsError"></div>
+  <header><h1>Visualiser une intégrale avec des rectangles de Riemann</h1></header>
 
+  <div class="wrap">
+    <div class="panel controls">
+      <label for="fn">Fonction</label>
+      <select id="fn">
+        <option value="x*x">f(x) = x²</option>
+        <option value="Math.sin(x)">f(x) = sin(x)</option>
+        <option value="3*x+1">f(x) = 3x + 1</option>
+        <option value="Math.exp(-x*x)">f(x) = e^{-x²}</option>
+        <option value="custom">Personnalisée…</option>
+      </select>
+
+      <div id="customWrap" style="display:none">
+        <label for="custom">Entrer f(x) en JavaScript (ex: Math.cos(x)+x*x/4)</label>
+        <input id="custom" type="text" placeholder="Ex: Math.cos(x)+x*x/4" />
+        <div class="small hint">⚠️ Utilise <code>Math.*</code> et <code>x</code> comme variable.</div>
+      </div>
+
+      <div class="row">
+        <div style="flex:1">
+          <label for="a">Borne a</label>
+          <input id="a" type="number" value="0" step="0.1" />
+        </div>
+        <div style="flex:1">
+          <label for="b">Borne b</label>
+          <input id="b" type="number" value="2" step="0.1" />
+        </div>
+      </div>
+
+      <label for="n">Nombre de rectangles : <span id="nVal">10</span></label>
+      <input id="n" class="slider" type="range" min="1" max="300" value="10" />
+
+      <label>Point d’échantillonnage</label>
+      <div class="row">
+        <label class="row-inline"><input type="radio" name="rule" value="left" checked /> gauche</label>
+        <label class="row-inline"><input type="radio" name="rule" value="mid" /> milieu</label>
+        <label class="row-inline"><input type="radio" name="rule" value="right" /> droite</label>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button id="fitY">Auto-calage vertical</button>
+        <button id="reset">Réinitialiser</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b>Somme des rectangles</b><div id="sum">–</div></div>
+        <div class="stat"><b>Référence (aire estimée*)</b><div id="true">–</div></div>
+        <div class="stat" style="grid-column:1 / -1"><b>Erreur (somme − référence)</b><div id="err">–</div></div>
+      </div>
+      <div class="small hint">*Référence calculée par quadrature numérique fine (pas 1e-3).</div>
+    </div>
+
+    <div class="panel">
+      <canvas id="plot" width="1200" height="700"></canvas>
+      <div class="legend">
+        <span><span class="dot func"></span>Courbe f(x)</span>
+        <span><span class="dot rect"></span>Rectangles (aire signée)</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // --- Affichage d’erreurs sur la page (utile sur téléphone) ---
+  const errBox = document.getElementById('jsError');
+  window.addEventListener('error', e=>{
+    errBox.style.display='block';
+    errBox.textContent = '💥 JavaScript a planté :\\n' + e.message + '\\n' +
+      (e.filename||'') + ':' + (e.lineno||'') + ':' + (e.colno||'') + '\\n\\n' +
+      (e.error && e.error.stack ? e.error.stack : '');
+  });
+
+  const $ = id => document.getElementById(id);
+  const fnSel = $("fn"), customWrap = $("customWrap"), custom = $("custom");
+  const aIn = $("a"), bIn = $("b"), nIn = $("n"), nVal = $("nVal");
+  const sumOut = $("sum"), trueOut = $("true"), errOut = $("err");
+  const fitBtn = $("fitY"), resetBtn = $("reset");
+  const canvas = $("plot"), ctx = canvas.getContext("2d");
+
+  // --- HiDPI scaling : dessiner en unités CSS (setTransform) ---
+  function scaleCanvas() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const cssW = Math.max(1, canvas.clientWidth);
+    const cssH = Math.max(1, canvas.clientHeight);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // on dessine en px CSS
+  }
+  scaleCanvas();
+  window.addEventListener("resize", ()=>{ scaleCanvas(); draw(); });
+
+  // --- Parser de fonction sûr (pas de "with", Math injecté) ---
+  function parseFunction() {
+    let expr = fnSel.value === "custom" ? (custom.value.trim() || "x") : fnSel.value;
+    try {
+      // new Function(args...) reçoit Math en param pour éviter "with"
+      // eslint-disable-next-line no-new-func
+      const f = new Function("x","Math", `return (${expr});`);
+      // test rapide
+      f(0, Math);
+      return x => f(x, Math);
+    } catch (e) {
+      alert("Expression invalide pour f(x) : " + e.message);
+      return _x => 0;
+    }
+  }
+
+  // --- Calcul d’amplitude verticale (échantillonnage) ---
+  let yRange = {ymin:-1, ymax:4};
+  function computeYRange(f, a, b) {
+    const n = 2000, step = (b - a) / n;
+    let ymin = Infinity, ymax = -Infinity;
+    for (let i = 0; i <= n; i++) {
+      const x = a + i * step;
+      const y = f(x);
+      if (!Number.isFinite(y)) continue;
+      if (y < ymin) ymin = y;
+      if (y > ymax) ymax = y;
+    }
+    if (!Number.isFinite(ymin) || !Number.isFinite(ymax)) { ymin = -1; ymax = 1; }
+    if (ymax === ymin) { ymax += 1; ymin -= 1; }
+    const pad = 0.08 * (ymax - ymin);
+    return { ymin: ymin - pad, ymax: ymax + pad };
+  }
+
+  // --- Dessin principal ---
+  function draw(){
+    const a = parseFloat(aIn.value), b = parseFloat(bIn.value);
+    const f = parseFunction();
+
+    yRange = computeYRange(f, a, b);
+    const {ymin, ymax} = yRange;
+
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const left = 20, top = 10, pad = 10;
+    const x2px = x => left + (x - a) / (b - a) * (W - left - pad);
+    const y2px = y => top + (ymax - y) / (ymax - ymin) * (H - top - pad);
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // axes
+    ctx.beginPath();
+    ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1.25;
+    ctx.moveTo(x2px(a), y2px(0)); ctx.lineTo(x2px(b), y2px(0)); // x
+    ctx.moveTo(x2px(0), y2px(ymin)); ctx.lineTo(x2px(0), y2px(ymax)); // y
+    ctx.stroke();
+
+    // courbe
+    ctx.beginPath();
+    const steps = 800;
+    for (let i=0;i<=steps;i++){
+      const x = a + (b-a)*i/steps;
+      const y = f(x);
+      const X = x2px(x), Y = y2px(y);
+      if (i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y);
+    }
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#50a8ff';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    // rectangles (gauche)
+    const n = +nIn.value; nVal.textContent = n;
+    const dx = (b-a)/n;
+    ctx.fillStyle = 'rgba(113,220,160,0.18)';
+    ctx.strokeStyle = 'rgba(113,220,160,0.45)';
+    let somme = 0;
+    for (let i=0;i<n;i++){
+      const xL = a + i*dx;
+      const h = f(xL);
+      somme += h*dx;
+      const X = x2px(xL), Y = y2px(h);
+      const w = x2px(xL+dx) - X;
+      const hpx = y2px(0) - Y;
+      ctx.fillRect(X, Y, w, hpx);
+      ctx.strokeRect(X, Y, w, hpx);
+    }
+    sumOut.textContent  = Number.isFinite(somme) ? somme.toFixed(6) : '—';
+
+    // référence par trapèzes fins
+    let ref = 0, m = 4000, d = (b-a)/m;
+    for(let i=0;i<m;i++){
+      const x1=a+i*d, x2=x1+d;
+      ref += 0.5*(f(x1)+f(x2))*d;
+    }
+    trueOut.textContent = Number.isFinite(ref) ? ref.toFixed(6) : '—';
+    errOut.textContent  = (somme - ref).toFixed(6);
+  }
+
+  // --- Événements & UI ---
+  function bind(){
+    fnSel.addEventListener('change', ()=>{
+      customWrap.style.display = fnSel.value==='custom' ? 'block' : 'none';
+      draw();
+    });
+    [custom, aIn, bIn, nIn].forEach(el=>{
+      el.addEventListener('input', draw);
+      el.addEventListener('change', draw);
+    });
+    fitBtn.addEventListener('click', draw);
+    resetBtn.addEventListener('click', ()=>{
+      fnSel.value='x*x'; custom.value='';
+      aIn.value=0; bIn.value=2; nIn.value=10;
+      draw();
+    });
+  }
+
+  // --- Go! ---
+  bind();
+  draw();
+})();
+</script>
+</body>
+          </html>
